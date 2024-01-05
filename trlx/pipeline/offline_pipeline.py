@@ -186,6 +186,89 @@ class PromptPipeline(BasePipeline):
             num_workers=0,
             drop_last=drop_last,
         )
+    
+@register_datapipeline
+class AsyncPromptPipeline(BasePipeline):
+    """
+    Dataloader which is used to supply prompts for either training or evaluation
+    Separate train and rollout prompts
+
+    Args:
+        prompts (`List[str]` or `List[Dict[str, Any]]`): list of raw text prompts or a dictionary with a required
+            key `"prompt"` and extra information, that would be passed along the generation for that prompt as a
+            keyword argument to a reward function.
+        max_prompt_length (`int`): max length of the prompt, if exceeded the prompt will be truncated according to
+            tokenizer's truncation setting.
+        tokenizer (`transformers.PreTrainedTokenizer`): a tokenizer to tokenize prompts with.
+        add_special_tokens (`bool`): whether to encode prompts with tokenizer's special tokens (passed directly
+            into `tokenizer.encode`)
+    """
+
+    def __init__(
+        self,
+        prompts: Union[List[Dict[str, Any]], List[str]],
+        max_prompt_length: int,
+        tokenizer: PreTrainedTokenizer,
+        add_special_tokens: bool = False,
+    ):
+        super().__init__()
+
+        if isinstance(prompts[0], dict):
+            assert "prompt" in prompts[0] and "rollout_prompt" in prompts[0]
+            metadata = prompts
+            prompts = [x.pop("prompt") for x in metadata]
+            rollout_prompts = [x.pop("rollout_prompt") for x in metadata]
+        else:
+            metadata = [{}] * len(prompts)
+
+        model_inputs = tokenizer(
+            prompts, truncation=True, padding=False, max_length=max_prompt_length, add_special_tokens=add_special_tokens
+        )
+        model_inputs = [
+            {"input_ids": tokens, "attention_mask": mask}
+            for tokens, mask in zip(model_inputs["input_ids"], model_inputs["attention_mask"])
+        ]
+        rollout_inputs = tokenizer(
+            rollout_prompts, truncation=True, padding=False, max_length=max_prompt_length, add_special_tokens=add_special_tokens
+        )
+        rollout_inputs = [
+            {"input_ids": tokens, "attention_mask": mask}
+            for tokens, mask in zip(rollout_inputs["input_ids"], rollout_inputs["attention_mask"])
+        ]
+
+        self.tokenizer = tokenizer
+        self.prompts = model_inputs
+        self.rollout_prompts = rollout_inputs
+        self.metadata = metadata
+
+    def __getitem__(self, ix: int):
+        return self.prompts[ix], self.rollout_prompts[ix], self.metadata[ix]
+
+    def __len__(self) -> int:
+        return len(self.prompts)
+
+    def create_loader(self, batch_size: int, shuffle=False, sampler=None, drop_last=False) -> DataLoader:
+        def collate_fn(xs):
+            prompts, rollout_prompts, metadata = zip(*xs)
+            out = self.tokenizer.pad([{"input_ids": x["input_ids"]} for x in prompts], return_tensors="pt")
+            rollout_tensors = self.tokenizer.pad([{"input_ids": x["input_ids"]} for x in rollout_prompts], return_tensors="pt")
+            for key in metadata[0]:
+                out[key] = [x[key] for x in metadata]
+            out["rollout_input_ids"] = rollout_tensors["input_ids"]
+            out["rollout_attention_mask"] = rollout_tensors["attention_mask"]
+            return out
+
+        # Since all data is already pre-processed, no need to have
+        # multi-process data loading
+        return DataLoader(
+            self,
+            batch_size=batch_size,
+            collate_fn=collate_fn,
+            shuffle=shuffle,
+            sampler=sampler,
+            num_workers=0,
+            drop_last=drop_last,
+        )
 
 
 def ilql_collate_fn(elems: Iterable[ILQLElement]):

@@ -2,7 +2,7 @@ from typing import Callable, List
 
 # Register load pipelines via module import
 from trlx.pipeline import _DATAPIPELINE
-from trlx.pipeline.offline_pipeline import PromptPipeline
+from trlx.pipeline.offline_pipeline import PromptPipeline, AsyncPromptPipeline
 
 # Register load trainers via module import
 from trlx.trainer import _TRAINERS, register_trainer
@@ -10,6 +10,7 @@ from trlx.trainer.accelerate_ilql_trainer import AccelerateILQLTrainer
 from trlx.trainer.accelerate_ppo_trainer import AcceleratePPOTrainer
 from trlx.trainer.accelerate_rft_trainer import AccelerateRFTTrainer
 from trlx.trainer.accelerate_sft_trainer import AccelerateSFTTrainer
+from trlx.trainer.accelerate_spo_trainer import AccelerateSPOTrainer
 
 try:
     from trlx.trainer.nemo_ilql_trainer import NeMoILQLTrainer
